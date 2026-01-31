@@ -1,0 +1,9 @@
+build/
+dist/
+*.spec
+*.pyc
+__pycache__/
+*.exe
+debug_*.py
+build_*.py
+wrapper.py
