@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local Maps Leads Scraper</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 30px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+        }
+        input, select, .slider-container {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+        input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 12px 0;
+        }
+        input[type="range"] {
+            flex: 1;
+            padding: 0;
+        }
+        .slider-value {
+            min-width: 50px;
+            text-align: center;
+            font-weight: bold;
+            color: #667eea;
+        }
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 15px 0;
+        }
+        input[type="checkbox"] {
+            width: auto;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 18px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 20px 0;
+            display: none;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+        .status {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            display: none;
+        }
+        .status.info {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+        .status.success {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+        .status.error {
+            background: #ffebee;
+            color: #c62828;
+        }
+        .results {
+            margin-top: 30px;
+            display: none;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        th {
+            background: #f5f5f5;
+            font-weight: 600;
+            color: #333;
+        }
+        tr:hover {
+            background: #f9f9f9;
+        }
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .metric-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .metric-label {
+            opacity: 0.9;
+            font-size: 0.9em;
+        }
+        .download-btn {
+            margin-top: 20px;
+            background: #4caf50;
+        }
+        .download-btn:hover {
+            box-shadow: 0 10px 20px rgba(76, 175, 80, 0.4);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🗺️ Local Maps Leads Scraper</h1>
+        <p class="subtitle">Scrape Google Maps business listings and vet websites for lead qualification</p>
+        
+        <form id="scrapeForm">
+            <div class="form-group">
+                <label for="keyword">Industry / Keyword *</label>
+                <input type="text" id="keyword" name="keyword" required placeholder="e.g., restaurants, dentists">
+            </div>
+            
+            <div class="form-group">
+                <label for="location">Center Address / City *</label>
+                <input type="text" id="location" name="location" required placeholder="e.g., New York, NY">
+            </div>
+            
+            <div class="form-group">
+                <label for="radius">Search Radius (km): <span class="slider-value" id="radiusValue">10</span></label>
+                <div class="slider-container">
+                    <input type="range" id="radius" name="radius" min="1" max="100" value="10">
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="maxResults">Max Results</label>
+                <input type="number" id="maxResults" name="maxResults" min="1" max="50" value="5">
+            </div>
+            
+            <div class="form-group">
+                <label for="reviewsThreshold">New Lead Definition (Max Reviews): <span class="slider-value" id="reviewsValue">15</span></label>
+                <div class="slider-container">
+                    <input type="range" id="reviewsThreshold" name="reviewsThreshold" min="0" max="100" value="15">
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label for="vettingThreshold">High Budget Score Threshold: <span class="slider-value" id="vettingValue">50</span></label>
+                <div class="slider-container">
+                    <input type="range" id="vettingThreshold" name="vettingThreshold" min="0" max="100" value="50">
+                </div>
+            </div>
+            
+            <div class="checkbox-group">
+                <input type="checkbox" id="onlyNoWebsite" name="onlyNoWebsite">
+                <label for="onlyNoWebsite">Only Show Leads Without Websites</label>
+            </div>
+            
+            <div class="checkbox-group">
+                <input type="checkbox" id="useScraperAPI" name="useScraperAPI">
+                <label for="useScraperAPI">Use ScraperAPI (if configured)</label>
+            </div>
+            
+            <button type="submit" id="submitBtn">Start Scraping</button>
+        </form>
+        
+        <div class="progress-bar" id="progressBar">
+            <div class="progress-fill" id="progressFill">0%</div>
+        </div>
+        
+        <div class="status" id="status"></div>
+        
+        <div class="results" id="results">
+            <div class="metrics" id="metrics"></div>
+            <div id="tableContainer"></div>
+            <button class="download-btn" id="downloadBtn" onclick="downloadCSV()">Download Results (CSV)</button>
+        </div>
+    </div>
+    
+    <script>
+        let currentData = [];
+        
+        // Update slider values
+        document.getElementById('radius').addEventListener('input', (e) => {
+            document.getElementById('radiusValue').textContent = e.target.value;
+        });
+        document.getElementById('reviewsThreshold').addEventListener('input', (e) => {
+            document.getElementById('reviewsValue').textContent = e.target.value;
+        });
+        document.getElementById('vettingThreshold').addEventListener('input', (e) => {
+            document.getElementById('vettingValue').textContent = e.target.value;
+        });
+        
+        // Geocoding function
+        async function geocodeLocation(location) {
+            try {
+                const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(location)}&limit=1`);
+                const data = await response.json();
+                if (data && data.length > 0) {
+                    return {
+                        lat: parseFloat(data[0].lat),
+                        lon: parseFloat(data[0].lon),
+                        address: data[0].display_name
+                    };
+                }
+                throw new Error('Location not found');
+            } catch (error) {
+                throw new Error(`Geocoding failed: ${error.message}`);
+            }
+        }
+        
+        // Convert radius to zoom level
+        function radiusToZoom(radius) {
+            if (radius <= 2) return 15;
+            if (radius <= 5) return 14;
+            if (radius <= 15) return 13;
+            if (radius <= 40) return 12;
+            if (radius <= 100) return 10;
+            return 8;
+        }
+        
+        // Show status message
+        function showStatus(message, type = 'info') {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+            statusEl.style.display = 'block';
+        }
+        
+        // Update progress
+        function updateProgress(value) {
+            const progressBar = document.getElementById('progressBar');
+            const progressFill = document.getElementById('progressFill');
+            progressBar.style.display = 'block';
+            progressFill.style.width = `${value}%`;
+            progressFill.textContent = `${Math.round(value)}%`;
+        }
+        
+        // Display results
+        function displayResults(data) {
+            currentData = data;
+            const resultsDiv = document.getElementById('results');
+            const metricsDiv = document.getElementById('metrics');
+            const tableContainer = document.getElementById('tableContainer');
+            
+            // Calculate metrics
+            const totalLeads = data.length;
+            const highPriority = data.filter(d => d['Lead Type'] === 'High Priority New Lead').length;
+            const sitesVetted = data.filter(d => d.Website !== 'N/A').length;
+            
+            // Display metrics
+            metricsDiv.innerHTML = `
+                <div class="metric-card">
+                    <div class="metric-value">${totalLeads}</div>
+                    <div class="metric-label">Total Leads</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">${highPriority}</div>
+                    <div class="metric-label">High Priority</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">${sitesVetted}</div>
+                    <div class="metric-label">Sites Vetted</div>
+                </div>
+            `;
+            
+            // Create table
+            if (data.length > 0) {
+                const table = document.createElement('table');
+                const headers = Object.keys(data[0]);
+                
+                // Header row
+                const thead = document.createElement('thead');
+                const headerRow = document.createElement('tr');
+                headers.forEach(header => {
+                    const th = document.createElement('th');
+                    th.textContent = header;
+                    headerRow.appendChild(th);
+                });
+                thead.appendChild(headerRow);
+                table.appendChild(thead);
+                
+                // Data rows
+                const tbody = document.createElement('tbody');
+                data.forEach(row => {
+                    const tr = document.createElement('tr');
+                    headers.forEach(header => {
+                        const td = document.createElement('td');
+                        td.textContent = row[header] || 'N/A';
+                        tr.appendChild(td);
+                    });
+                    tbody.appendChild(tr);
+                });
+                table.appendChild(tbody);
+                
+                tableContainer.innerHTML = '';
+                tableContainer.appendChild(table);
+            }
+            
+            resultsDiv.style.display = 'block';
+        }
+        
+        // Download CSV
+        function downloadCSV() {
+            if (currentData.length === 0) return;
+            
+            const headers = Object.keys(currentData[0]);
+            const csv = [
+                headers.join(','),
+                ...currentData.map(row => 
+                    headers.map(header => {
+                        const value = row[header] || '';
+                        return `"${String(value).replace(/"/g, '""')}"`;
+                    }).join(',')
+                )
+            ].join('\n');
+            
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'leads.csv';
+            a.click();
+            window.URL.revokeObjectURL(url);
+        }
+        
+        // Form submission
+        document.getElementById('scrapeForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Scraping...';
+            
+            document.getElementById('results').style.display = 'none';
+            document.getElementById('progressBar').style.display = 'block';
+            updateProgress(0);
+            
+            try {
+                // Get form values
+                const keyword = document.getElementById('keyword').value;
+                const location = document.getElementById('location').value;
+                const radius = parseInt(document.getElementById('radius').value);
+                const maxResults = parseInt(document.getElementById('maxResults').value);
+                const reviewsThreshold = parseInt(document.getElementById('reviewsThreshold').value);
+                const vettingThreshold = parseInt(document.getElementById('vettingThreshold').value);
+                const onlyNoWebsite = document.getElementById('onlyNoWebsite').checked;
+                const useScraperAPI = document.getElementById('useScraperAPI').checked;
+                
+                showStatus('Geocoding location...', 'info');
+                
+                // Geocode location
+                const geoData = await geocodeLocation(location);
+                showStatus(`📍 Found Location: ${geoData.address} (${geoData.lat}, ${geoData.lon})`, 'success');
+                
+                const zoom = radiusToZoom(radius);
+                
+                showStatus('Scraping Google Maps... This may take a moment.', 'info');
+                updateProgress(20);
+                
+                // Call API
+                const response = await fetch('/api/scrape', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        keyword,
+                        location,
+                        latitude: geoData.lat,
+                        longitude: geoData.lon,
+                        zoom_level: zoom,
+                        max_results: maxResults,
+                        reviews_threshold: reviewsThreshold,
+                        vetting_threshold: vettingThreshold,
+                        use_scraper_api: useScraperAPI
+                    })
+                });
+                
+                updateProgress(80);
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    let data = result.data;
+                    
+                    // Apply filter
+                    if (onlyNoWebsite) {
+                        data = data.filter(d => d.Website === 'N/A');
+                    }
+                    
+                    updateProgress(100);
+                    showStatus(`Scraping Completed! Found ${data.length} leads.`, 'success');
+                    displayResults(data);
+                } else {
+                    throw new Error(result.error || 'Scraping failed');
+                }
+                
+            } catch (error) {
+                showStatus(`Error: ${error.message}`, 'error');
+                console.error(error);
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Start Scraping';
+                setTimeout(() => {
+                    document.getElementById('progressBar').style.display = 'none';
+                }, 2000);
+            }
+        });
+    </script>
+</body>
+</html>
