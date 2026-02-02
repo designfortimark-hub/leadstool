@@ -1,54 +1,38 @@
 import streamlit as st
 import pandas as pd
-import requests
+from playwright.sync_api import sync_playwright
+from playwright_stealth import stealth_sync
 from bs4 import BeautifulSoup
 import time
 import random
 import re
 import os
-import json
-import urllib.parse
+import sys
+import asyncio
+
+# Fix for Windows Event Loop Policy
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 from geopy.geocoders import Nominatim
 
 # --- CONFIGURATION & HELPERS ---
 
-def random_sleep(min_seconds=1, max_seconds=3):
+def random_sleep(min_seconds=2, max_seconds=5):
+    """Human-like random sleep"""
     time.sleep(random.uniform(min_seconds, max_seconds))
 
-def get_scraper_api_url(url, api_key=None):
-    """Get ScraperAPI URL for headless browser scraping"""
-    if not api_key:
-        api_key = os.getenv('SCRAPER_API_KEY', '')
-    
-    if api_key:
-        return f"http://api.scraperapi.com?api_key={api_key}&url={urllib.parse.quote(url)}&render=true"
-    return url
-
-def fetch_with_retry(url, max_retries=3, use_scraper_api=False, api_key=None):
-    """Fetch URL with retry logic and optional ScraperAPI"""
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-    }
-    
-    if use_scraper_api:
-        url = get_scraper_api_url(url, api_key)
-    
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, headers=headers, timeout=30)
-            response.raise_for_status()
-            return response.text
-        except Exception as e:
-            if attempt < max_retries - 1:
-                random_sleep(2, 5)
-                continue
-            raise e
-    return None
+def human_scroll(page, scroll_box_selector, scrolls=3):
+    """Simulates human-like scrolling"""
+    try:
+        for i in range(scrolls):
+            page.hover(scroll_box_selector)
+            # Random scroll amount
+            scroll_amount = random.randint(300, 800)
+            page.mouse.wheel(0, scroll_amount)
+            random_sleep(1, 3)
+    except:
+        pass
 
 # --- VETTING ENGINE ---
 
@@ -59,15 +43,11 @@ class VettingEngine:
         }
 
     def analyze_site(self, url):
-        """
-        Scrapes the website HTML to find 'Wealth Markers'.
-        Returns a score and details.
-        """
+        """Analyzes website for wealth markers"""
         score = 0
         details = []
         budget_potential = "Unknown"
         
-        # Tags to look for
         wealth_markers = {
             'ads': [r'facebook\.com/tr', r'linkedin\.com/insight', r'adsbygoogle', r'google-analytics', r'googletagmanager'],
             'tech': [r'shopify', r'hubspot', r'salesforce', r'magento', r'woocommerce'],
@@ -77,6 +57,7 @@ class VettingEngine:
         low_budget_markers = [r'wix\.com', r'blogspot\.com', r'wordpress\.com', r'weebly\.com']
 
         try:
+            import requests
             response = requests.get(url, headers=self.headers, timeout=10, allow_redirects=True)
             html_content = response.text.lower()
         except Exception as e:
@@ -115,288 +96,201 @@ class VettingEngine:
 
         return score, ", ".join(details), budget_potential
 
-# --- SCRAPER LOGIC ---
+# --- SCRAPER LOGIC WITH PLAYWRIGHT (HUMAN-LIKE) ---
 
-def parse_google_maps_data(html_content, max_results):
-    """Parse Google Maps HTML to extract business listings"""
-    soup = BeautifulSoup(html_content, 'html.parser')
+def run_google_maps_scraper(keyword, search_location, latitude, longitude, zoom_level, max_results, progress_bar, status_text, reviews_threshold, vetting_threshold):
+    """Scrapes Google Maps using Playwright with stealth - acts like a human"""
     leads = []
     
-    # Try to find business listings in the HTML
-    # Google Maps uses various selectors - we'll try multiple approaches
-    listings = []
-    
-    # Method 1: Look for place links
-    place_links = soup.find_all('a', href=re.compile(r'/maps/place/'))
-    for link in place_links[:max_results]:
-        name = link.get_text(strip=True) or link.get('aria-label', 'Unknown')
-        if name and name != 'Unknown' and len(name) > 2:
-            place_id_match = re.search(r'/place/([^/]+)', link.get('href', ''))
-            place_id = place_id_match.group(1) if place_id_match else None
-            
-            if place_id:
-                listings.append({
-                    'name': name,
-                    'place_id': place_id,
-                    'url': link.get('href', '')
-                })
-    
-    # Method 2: Look for JSON-LD structured data
-    json_scripts = soup.find_all('script', type='application/ld+json')
-    for script in json_scripts:
+    with sync_playwright() as p:
+        # Launch browser with human-like settings
+        browser = p.chromium.launch(
+            headless=True,  # Set to False to see the browser
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+                "--no-sandbox"
+            ]
+        )
+        
+        # Create context with realistic settings
+        context = browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            locale='en-US',
+            geolocation={'latitude': latitude, 'longitude': longitude},
+            permissions=['geolocation'],
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        )
+        
+        # Apply stealth to avoid detection
+        stealth_sync(context)
+        
+        page = context.new_page()
+        
         try:
-            data = json.loads(script.string)
-            if isinstance(data, dict) and data.get('@type') == 'LocalBusiness':
-                listings.append({
-                    'name': data.get('name', 'Unknown'),
-                    'phone': data.get('telephone', 'N/A'),
-                    'website': data.get('url', 'N/A'),
-                    'rating': str(data.get('aggregateRating', {}).get('ratingValue', '0')),
-                    'reviews': data.get('aggregateRating', {}).get('reviewCount', 0)
-                })
-        except:
-            continue
-    
-    # Method 3: Extract from inline JSON data
-    inline_scripts = soup.find_all('script')
-    for script in inline_scripts:
-        if script.string and 'window.APP_INITIALIZATION_STATE' in script.string:
+            query = f"{keyword} in {search_location}"
+            status_text.text(f"🔍 Searching for: {query} near ({latitude}, {longitude})")
+            
+            # Build Google Maps URL
+            import urllib.parse
+            encoded_query = urllib.parse.quote(query)
+            url = f"https://www.google.com/maps/search/{encoded_query}/@{latitude},{longitude},{zoom_level}z"
+            
+            status_text.text("🌐 Opening Google Maps (acting like a human browser)...")
+            page.goto(url, timeout=60000, wait_until='networkidle')
+            
+            # Human-like wait
+            random_sleep(3, 5)
+            
+            # Wait for results feed
             try:
-                # Extract JSON data from Google Maps initialization
-                json_match = re.search(r'\[null,null,\[\["([^"]+)"', script.string)
-                if json_match:
-                    # This is a simplified extraction - Google Maps uses complex nested JSON
-                    pass
+                page.wait_for_selector('div[role="feed"]', timeout=15000)
+                status_text.text("✅ Found results feed, scrolling to load more...")
             except:
-                continue
-    
-    return listings
+                status_text.text("⚠️ Could not find results feed. Trying to continue...")
+            
+            # Human-like scrolling to load results
+            feed_selector = 'div[role="feed"]'
+            listing_selector = 'a[href^="https://www.google.com/maps/place"]'
+            
+            found_count = 0
+            retries = 0
+            max_retries = 5
+            
+            status_text.text("📜 Scrolling to load listings (human-like behavior)...")
+            
+            while found_count < max_results and retries < max_retries:
+                listings = page.locator(listing_selector).all()
+                found_count = len(listings)
+                status_text.text(f"📊 Found {found_count} listings so far...")
+                
+                if found_count >= max_results:
+                    break
+                
+                # Human-like scroll
+                human_scroll(page, feed_selector, scrolls=2)
+                random_sleep(2, 4)
+                
+                # Check if new listings appeared
+                new_listings = page.locator(listing_selector).all()
+                if len(new_listings) == found_count:
+                    retries += 1
+                else:
+                    retries = 0
+            
+            # Get the listings
+            listings = page.locator(listing_selector).all()[:max_results]
+            status_text.text(f"✅ Found {len(listings)} listings. Extracting details...")
+            
+            vetter = VettingEngine()
+            progress_step = 1.0 / len(listings) if listings else 0
+            current_progress = 0.0
 
-def run_google_maps_scraper(keyword, search_location, latitude, longitude, zoom_level, max_results, progress_bar, status_text, reviews_threshold, vetting_threshold, use_api=False, api_key=None):
-    """Main scraper function - now Vercel compatible"""
-    leads = []
-    vetter = VettingEngine()
-    
-    try:
-        query = f"{keyword} in {search_location}"
-        status_text.text(f"Searching for: {query} near ({latitude}, {longitude})")
-        
-        # Build Google Maps search URL
-        encoded_query = urllib.parse.quote(query)
-        url = f"https://www.google.com/maps/search/{encoded_query}/@{latitude},{longitude},{zoom_level}z"
-        
-        # Fetch the page
-        status_text.text("Fetching Google Maps data...")
-        html_content = fetch_with_retry(url, use_scraper_api=use_api, api_key=api_key)
-        
-        if not html_content:
-            status_text.text("Failed to fetch Google Maps. Consider using ScraperAPI or Google Maps Places API.")
-            return []
-        
-        # Parse the HTML
-        status_text.text("Parsing results...")
-        parsed_listings = parse_google_maps_data(html_content, max_results)
-        
-        if not parsed_listings:
-            # Fallback: Use Google Maps Places API if available
-            places_api_key = os.getenv('GOOGLE_MAPS_API_KEY', '')
-            if places_api_key:
-                return fetch_from_places_api(keyword, latitude, longitude, max_results, reviews_threshold, vetting_threshold, vetter, status_text, progress_bar)
-            else:
-                status_text.text("No listings found. Google Maps may require JavaScript rendering. Consider using ScraperAPI or Google Maps Places API.")
-                return []
-        
-        progress_step = 1.0 / len(parsed_listings) if parsed_listings else 0
-        current_progress = 0.0
-        
-        for i, listing in enumerate(parsed_listings):
-            try:
-                name = listing.get('name', 'Unknown')
-                
-                # Try to get more details by fetching the place page
-                phone = listing.get('phone', 'N/A')
-                website = listing.get('website', 'N/A')
-                rating = listing.get('rating', '0')
-                reviews_count = listing.get('reviews', 0)
-                
-                # If we have a place URL, try to get more details
-                if listing.get('url') and website == 'N/A':
-                    place_url = f"https://www.google.com{listing['url']}" if listing['url'].startswith('/') else listing['url']
+            for i, listing in enumerate(listings):
+                try:
+                    # Scroll listing into view (human-like)
+                    listing.scroll_into_view_if_needed()
+                    random_sleep(1, 2)
+                    
+                    # Get name from listing
+                    name = listing.get_attribute("aria-label")
+                    if not name or name == "Results":
+                        name = listing.inner_text() or "Unknown"
+                    name = name.strip()
+                    
+                    if not name or name == "Unknown":
+                        continue
+                    
+                    status_text.text(f"🔎 Processing: {name} ({i+1}/{len(listings)})")
+                    
+                    # Click to open details (human-like)
+                    listing.click()
+                    random_sleep(2, 4)  # Human wait time
+                    
+                    # Wait for detail pane to load
                     try:
-                        place_html = fetch_with_retry(place_url, use_scraper_api=use_api, api_key=api_key)
-                        if place_html:
-                            place_soup = BeautifulSoup(place_html, 'html.parser')
-                            
-                            # Extract phone
-                            if phone == 'N/A':
-                                phone_elem = place_soup.find('button', attrs={'data-item-id': re.compile(r'phone:')})
-                                if phone_elem:
-                                    phone = phone_elem.get('aria-label', 'N/A').replace('Phone: ', '').strip()
-                            
-                            # Extract website
-                            if website == 'N/A':
-                                website_elem = place_soup.find('a', attrs={'data-item-id': 'authority'})
-                                if website_elem:
-                                    website = website_elem.get('href', 'N/A')
-                            
-                            # Extract rating and reviews
-                            rating_elem = place_soup.find('span', attrs={'role': 'img', 'aria-label': re.compile(r'stars')})
-                            if rating_elem:
-                                rating = rating_elem.get('aria-label', '0').split(' ')[0]
-                            
-                            reviews_elem = place_soup.find('button', attrs={'aria-label': re.compile(r'reviews')})
-                            if reviews_elem:
-                                reviews_text = reviews_elem.get('aria-label', '0')
-                                reviews_match = re.search(r'(\d+)', reviews_text.replace(',', ''))
-                                if reviews_match:
-                                    reviews_count = int(reviews_match.group(1))
+                        page.wait_for_selector('div[role="main"]', timeout=5000)
                     except:
                         pass
-                
-                # Determine claimed status (heuristic)
-                is_claimed = "Claimed" if website != "N/A" or reviews_count > 0 else "Unclaimed"
-                
-                # Lead filtering
-                lead_status = "Standard"
-                if reviews_count < reviews_threshold or is_claimed == "Unclaimed":
-                    lead_status = "High Priority New Lead"
-                
-                # Vetting
-                vetting_score = 0
-                vetting_details = ""
-                budget = "N/A"
-                
-                if website != "N/A":
-                    vetting_score, vetting_details, _ = vetter.analyze_site(website)
                     
-                    if vetting_score >= vetting_threshold:
-                        budget = "High (Target Met)"
-                    elif vetting_score >= (vetting_threshold / 2):
-                        budget = "Medium"
-                    else:
-                        budget = "Low"
-                
-                lead = {
-                    "Name": name,
-                    "Phone": phone,
-                    "Website": website,
-                    "Reviews": reviews_count,
-                    "Rating": rating,
-                    "Status": is_claimed,
-                    "Lead Type": lead_status,
-                    "Vetting Score": vetting_score,
-                    "Markers": vetting_details,
-                    "Est. Budget": budget
-                }
-                leads.append(lead)
-                
-                current_progress += progress_step
-                if progress_bar:
-                    progress_bar.progress(min(current_progress, 1.0))
-                status_text.text(f"Processed: {name}")
-                
-            except Exception as e:
-                print(f"Error processing listing {i}: {e}")
-                continue
-        
-    except Exception as e:
-        st.error(f"Critical Scraper Error: {e}")
-        import traceback
-        st.code(traceback.format_exc())
-    
-    return leads
+                    # Get page content
+                    content = page.content()
+                    soup = BeautifulSoup(content, 'html.parser')
+                    
+                    # Extract phone
+                    phone_btn = soup.find('button', attrs={'data-item-id': re.compile(r'phone:')})
+                    phone = phone_btn['aria-label'].replace("Phone: ", "").strip() if phone_btn else "N/A"
+                    
+                    # Extract website
+                    website_btn = soup.find('a', attrs={'data-item-id': "authority"})
+                    website = website_btn['href'] if website_btn else "N/A"
+                    
+                    # Extract rating
+                    rating_span = soup.find('span', attrs={'role': 'img', 'aria-label': re.compile(r'stars')})
+                    rating = rating_span['aria-label'].split(" ")[0] if rating_span else "0"
+                    
+                    # Extract reviews count
+                    reviews_btn = soup.find('button', attrs={'aria-label': re.compile(r'reviews')})
+                    reviews_text = reviews_btn['aria-label'] if reviews_btn else "0"
+                    reviews_count = int(re.search(r'(\d+)', reviews_text.replace(',','')).group(1)) if re.search(r'\d+', reviews_text) else 0
 
-def fetch_from_places_api(keyword, latitude, longitude, max_results, reviews_threshold, vetting_threshold, vetter, status_text, progress_bar):
-    """Fallback: Use Google Maps Places API"""
-    api_key = os.getenv('GOOGLE_MAPS_API_KEY', '')
-    if not api_key:
-        return []
-    
-    try:
-        # Use Places API Text Search
-        url = "https://maps.googleapis.com/maps/api/place/textsearch/json"
-        params = {
-            'query': keyword,
-            'location': f"{latitude},{longitude}",
-            'radius': 5000,
-            'key': api_key
-        }
-        
-        response = requests.get(url, params=params, timeout=10)
-        data = response.json()
-        
-        if data.get('status') != 'OK':
-            return []
-        
-        leads = []
-        places = data.get('results', [])[:max_results]
-        progress_step = 1.0 / len(places) if places else 0
-        current_progress = 0.0
-        
-        for place in places:
-            name = place.get('name', 'Unknown')
-            rating = str(place.get('rating', 0))
-            reviews_count = place.get('user_ratings_total', 0)
-            phone = 'N/A'
-            website = 'N/A'
+                    # Claimed status
+                    claimed_btn = soup.find('button', attrs={'data-item-id': 'merchant'})
+                    is_claimed = "Unclaimed" if claimed_btn else "Claimed"
+                    
+                    # Lead filtering
+                    lead_status = "Standard"
+                    if reviews_count < reviews_threshold or is_claimed == "Unclaimed":
+                        lead_status = "High Priority New Lead"
+                    
+                    # Vetting
+                    vetting_score = 0
+                    vetting_details = ""
+                    budget = "N/A"
+                    
+                    if website != "N/A":
+                        vetting_score, vetting_details, _ = vetter.analyze_site(website)
+                        
+                        if vetting_score >= vetting_threshold:
+                            budget = "High (Target Met)"
+                        elif vetting_score >= (vetting_threshold / 2):
+                            budget = "Medium"
+                        else:
+                            budget = "Low"
+                    
+                    lead = {
+                        "Name": name,
+                        "Phone": phone,
+                        "Website": website,
+                        "Reviews": reviews_count,
+                        "Rating": rating,
+                        "Status": is_claimed,
+                        "Lead Type": lead_status,
+                        "Vetting Score": vetting_score,
+                        "Markers": vetting_details,
+                        "Est. Budget": budget
+                    }
+                    leads.append(lead)
+                    
+                    current_progress += progress_step
+                    progress_bar.progress(min(current_progress, 1.0))
+                    status_text.text(f"✅ Processed: {name}")
+                    
+                    # Human-like pause between listings
+                    random_sleep(1, 2)
+                    
+                except Exception as e:
+                    st.warning(f"Error processing listing {i+1}: {e}")
+                    continue
+
+        except Exception as e:
+            st.error(f"Critical Scraper Error: {e}")
+            import traceback
+            st.code(traceback.format_exc())
+        finally:
+            browser.close()
             
-            # Get place details for phone and website
-            place_id = place.get('place_id')
-            if place_id:
-                details_url = "https://maps.googleapis.com/maps/api/place/details/json"
-                details_params = {
-                    'place_id': place_id,
-                    'fields': 'formatted_phone_number,website',
-                    'key': api_key
-                }
-                details_response = requests.get(details_url, params=details_params, timeout=10)
-                details_data = details_response.json()
-                if details_data.get('status') == 'OK':
-                    result = details_data.get('result', {})
-                    phone = result.get('formatted_phone_number', 'N/A')
-                    website = result.get('website', 'N/A')
-            
-            is_claimed = "Claimed" if website != "N/A" or reviews_count > 0 else "Unclaimed"
-            lead_status = "Standard"
-            if reviews_count < reviews_threshold or is_claimed == "Unclaimed":
-                lead_status = "High Priority New Lead"
-            
-            vetting_score = 0
-            vetting_details = ""
-            budget = "N/A"
-            
-            if website != "N/A":
-                vetting_score, vetting_details, _ = vetter.analyze_site(website)
-                if vetting_score >= vetting_threshold:
-                    budget = "High (Target Met)"
-                elif vetting_score >= (vetting_threshold / 2):
-                    budget = "Medium"
-                else:
-                    budget = "Low"
-            
-            lead = {
-                "Name": name,
-                "Phone": phone,
-                "Website": website,
-                "Reviews": reviews_count,
-                "Rating": rating,
-                "Status": is_claimed,
-                "Lead Type": lead_status,
-                "Vetting Score": vetting_score,
-                "Markers": vetting_details,
-                "Est. Budget": budget
-            }
-            leads.append(lead)
-            
-            current_progress += progress_step
-            if progress_bar:
-                progress_bar.progress(min(current_progress, 1.0))
-            status_text.text(f"Processed: {name}")
-        
-        return leads
-    except Exception as e:
-        st.error(f"Places API Error: {e}")
-        return []
+    return leads
 
 # --- UI LAYOUT ---
 
@@ -404,22 +298,8 @@ def main():
     st.set_page_config(page_title="Local Maps Leads Pro", layout="wide", page_icon="🗺️")
     
     st.title("🗺️ Local Maps Leads Scraper & Vetting Tool")
+    st.markdown("**Human-like browsing with Playwright + Stealth**")
     st.markdown("---")
-    
-    # API Configuration Info
-    with st.expander("🔧 API Configuration (Optional but Recommended)"):
-        st.info("""
-        **For best results, configure one of these:**
-        
-        1. **ScraperAPI** (Recommended for web scraping):
-           - Get free API key at https://www.scraperapi.com
-           - Set environment variable: `SCRAPER_API_KEY`
-        
-        2. **Google Maps Places API** (Most reliable):
-           - Enable Places API in Google Cloud Console
-           - Get API key and set: `GOOGLE_MAPS_API_KEY`
-           - More accurate data but requires billing setup
-        """)
     
     # Sidebar
     st.sidebar.header("Configuration")
@@ -428,8 +308,6 @@ def main():
     reviews_threshold = st.sidebar.slider("New Lead Definition (Max Reviews)", 0, 100, 15, help="Businesses with fewer reviews than this are marked 'High Priority'.")
     vetting_threshold = st.sidebar.slider("High Budget Score Threshold", 0, 100, 50, help="Websites with a vetting score above this are marked 'High Budget'.")
     only_no_website = st.sidebar.checkbox("Only Show Leads Without Websites", help="Useful for selling web design services.")
-    
-    use_scraper_api = st.sidebar.checkbox("Use ScraperAPI (if configured)", value=False, help="Enable if you have SCRAPER_API_KEY set")
     
     with st.sidebar.form("search_form"):
         keyword = st.text_input("Industry / Keyword", "")
@@ -440,10 +318,11 @@ def main():
         
         max_results = st.number_input("Max Results", min_value=1, max_value=50, value=5)
         
-        submitted = st.form_submit_button("Start Scraping")
+        submitted = st.form_submit_button("🚀 Start Scraping")
     
     st.sidebar.markdown("---")
-    st.sidebar.info("💡 **Tip**: For best results, use Google Maps Places API or ScraperAPI")
+    st.sidebar.info("💡 Uses Playwright with stealth to browse like a human")
+    st.sidebar.warning("⚠️ Make sure Playwright browsers are installed:\n`playwright install chromium`")
     
     # Main Area
     if submitted:
@@ -480,9 +359,7 @@ def main():
                     progress_bar = st.progress(0)
                     status_text = st.empty()
                     
-                    api_key = os.getenv('SCRAPER_API_KEY', '') if use_scraper_api else None
-                    
-                    with st.spinner("Scraping Google Maps... (This may take a moment)"):
+                    with st.spinner("🤖 Initializing human-like browser (Playwright + Stealth)..."):
                         data = run_google_maps_scraper(
                             keyword, 
                             location_input, 
@@ -491,13 +368,11 @@ def main():
                             progress_bar, 
                             status_text, 
                             reviews_threshold, 
-                            vetting_threshold,
-                            use_scraper_api=use_scraper_api,
-                            api_key=api_key
+                            vetting_threshold
                         )
 
                     if data:
-                        st.success(f"Scraping Completed! Found {len(data)} leads.")
+                        st.success(f"✅ Scraping Completed! Found {len(data)} leads.")
                         
                         df = pd.DataFrame(data)
                         
@@ -517,19 +392,13 @@ def main():
                         # Export
                         csv = df.to_csv(index=False).encode('utf-8')
                         st.download_button(
-                            label="Download Results (CSV)",
+                            label="📥 Download Results (CSV)",
                             data=csv,
                             file_name=f"leads_{keyword}_{location_input}.csv",
                             mime="text/csv"
                         )
                     else:
-                        st.warning("No leads found. Try:")
-                        st.markdown("""
-                        - Using Google Maps Places API (most reliable)
-                        - Using ScraperAPI for JavaScript rendering
-                        - Adjusting your search terms or location
-                        - Increasing wait times
-                        """)
+                        st.warning("No leads found. Try a different location or increase wait times.")
                 
                 except Exception as e:
                     import traceback

@@ -240,7 +240,13 @@
             
             <div class="checkbox-group">
                 <input type="checkbox" id="useScraperAPI" name="useScraperAPI">
-                <label for="useScraperAPI">Use ScraperAPI (if configured)</label>
+                <label for="useScraperAPI">Use ScraperAPI (Optional - for better results, set SCRAPER_API_KEY env var)</label>
+            </div>
+            
+            <div style="background: #e3f2fd; border: 1px solid #2196f3; border-radius: 8px; padding: 15px; margin: 20px 0;">
+                <strong>ℹ️ Note:</strong> This scraper works without APIs by extracting data from HTML. 
+                Results may be limited since Google Maps loads content dynamically with JavaScript. 
+                For best results, use Google Maps Places API (set <code>GOOGLE_MAPS_API_KEY</code> env var).
             </div>
             
             <button type="submit" id="submitBtn">Start Scraping</button>
@@ -460,6 +466,19 @@
                 });
                 
                 updateProgress(80);
+                
+                // Check response status
+                if (!response.ok) {
+                    const text = await response.text();
+                    throw new Error(`API error (${response.status}): ${text.substring(0, 200)}`);
+                }
+                
+                // Check if response is JSON
+                const contentType = response.headers.get('content-type') || '';
+                if (!contentType.includes('application/json')) {
+                    const text = await response.text();
+                    throw new Error(`API returned non-JSON response. Content-Type: ${contentType}. Response: ${text.substring(0, 300)}`);
+                }
                 
                 const result = await response.json();
                 

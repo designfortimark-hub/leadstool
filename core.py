@@ -119,15 +119,15 @@ class VettingEngine:
 # --- SCRAPER LOGIC ---
 
 def parse_google_maps_data(html_content, max_results):
-    """Parse Google Maps HTML to extract business listings"""
+    """Parse Google Maps HTML to extract business listings - tries multiple methods"""
     soup = BeautifulSoup(html_content, 'html.parser')
     listings = []
     
-    # Method 1: Look for place links
+    # Method 1: Look for place links in HTML
     place_links = soup.find_all('a', href=re.compile(r'/maps/place/'))
-    for link in place_links[:max_results]:
+    for link in place_links[:max_results * 2]:  # Get more to filter
         name = link.get_text(strip=True) or link.get('aria-label', 'Unknown')
-        if name and name != 'Unknown' and len(name) > 2:
+        if name and name != 'Unknown' and len(name) > 2 and name not in ['Results', 'Directions']:
             place_id_match = re.search(r'/place/([^/]+)', link.get('href', ''))
             place_id = place_id_match.group(1) if place_id_match else None
             
@@ -154,14 +154,87 @@ def parse_google_maps_data(html_content, max_results):
         except:
             continue
     
-    return listings
+    # Method 3: Extract from inline JavaScript data (Google Maps embeds data in script tags)
+    all_scripts = soup.find_all('script')
+    for script in all_scripts:
+        if script.string:
+            # Look for window.APP_INITIALIZATION_STATE or similar patterns
+            script_text = script.string
+            
+            # Try to find place data in various formats
+            # Pattern 1: Look for place names in quotes followed by coordinates
+            place_patterns = [
+                r'\["([^"]+)",null,null,null,\[(-?\d+\.\d+),(-?\d+\.\d+)\]',  # Name with coords
+                r'"([^"]+)"\s*,\s*null\s*,\s*null\s*,\s*null\s*,\s*\[(-?\d+\.\d+),(-?\d+\.\d+)\]',
+            ]
+            
+            for pattern in place_patterns:
+                matches = re.finditer(pattern, script_text)
+                for match in matches:
+                    name = match.group(1)
+                    if name and len(name) > 2 and name not in ['null', 'undefined', 'true', 'false']:
+                        listings.append({
+                            'name': name,
+                            'place_id': None,
+                            'url': None
+                        })
+            
+            # Pattern 2: Look for business names in data structures
+            # Google Maps often has: ["Business Name", ...]
+            business_name_pattern = r'\["([A-Za-z0-9\s&\.\-\']{3,50})",\d+'
+            matches = re.finditer(business_name_pattern, script_text)
+            for match in matches:
+                name = match.group(1).strip()
+                if name and len(name) > 2:
+                    # Avoid duplicates
+                    if not any(l.get('name') == name for l in listings):
+                        listings.append({
+                            'name': name,
+                            'place_id': None,
+                            'url': None
+                        })
+    
+    # Method 4: Look for text content that might be business names
+    # This is a fallback - look for text that appears to be business listings
+    text_content = soup.get_text()
+    # Look for patterns like "Business Name - Address" or similar
+    potential_names = re.findall(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*(?:\s+[&\-])?[A-Za-z\s]+)', text_content)
+    for name in potential_names[:max_results]:
+        name = name.strip()
+        if len(name) > 3 and len(name) < 100:
+            # Avoid common non-business text
+            skip_words = ['Google', 'Maps', 'Search', 'Directions', 'Save', 'Share', 'Send', 'Website', 'Call']
+            if not any(skip in name for skip in skip_words):
+                if not any(l.get('name') == name for l in listings):
+                    listings.append({
+                        'name': name,
+                        'place_id': None,
+                        'url': None
+                    })
+    
+    # Remove duplicates and limit results
+    seen = set()
+    unique_listings = []
+    for listing in listings:
+        name_key = listing['name'].lower().strip()
+        if name_key not in seen and len(unique_listings) < max_results:
+            seen.add(name_key)
+            unique_listings.append(listing)
+    
+    return unique_listings
 
 def run_google_maps_scraper(keyword, search_location, latitude, longitude, zoom_level, max_results, progress_bar, status_text, reviews_threshold, vetting_threshold, use_api=False, api_key=None):
-    """Main scraper function - Vercel compatible"""
+    """Main scraper function - tries to work without API, but results may be limited"""
     leads = []
     vetter = VettingEngine()
     
     try:
+        places_api_key = os.getenv('GOOGLE_MAPS_API_KEY', '')
+        
+        # If Google Maps Places API is available, use it (most reliable)
+        if places_api_key:
+            return fetch_from_places_api(keyword, latitude, longitude, max_results, reviews_threshold, vetting_threshold, vetter, status_text, progress_bar)
+        
         query = f"{keyword} in {search_location}"
         if status_text:
             status_text.text(f"Searching for: {query} near ({latitude}, {longitude})")
@@ -170,30 +243,31 @@ def run_google_maps_scraper(keyword, search_location, latitude, longitude, zoom_
         encoded_query = urllib.parse.quote(query)
         url = f"https://www.google.com/maps/search/{encoded_query}/@{latitude},{longitude},{zoom_level}z"
         
-        # Fetch the page
+        # Try to fetch without API first (may get limited results)
         if status_text:
-            status_text.text("Fetching Google Maps data...")
-        html_content = fetch_with_retry(url, use_scraper_api=use_api, api_key=api_key)
+            status_text.text("Fetching Google Maps data (no API - results may be limited)...")
+        
+        # Use ScraperAPI if provided, otherwise try direct fetch
+        if use_api and api_key:
+            html_content = fetch_with_retry(url, use_scraper_api=True, api_key=api_key)
+        else:
+            # Try direct fetch - Google Maps may return some data in initial HTML
+            html_content = fetch_with_retry(url, use_scraper_api=False, api_key=None)
         
         if not html_content:
             if status_text:
-                status_text.text("Failed to fetch Google Maps. Consider using ScraperAPI or Google Maps Places API.")
+                status_text.text("Failed to fetch Google Maps. The page may be blocking requests.")
             return []
         
-        # Parse the HTML
+        # Parse the HTML - try to extract whatever data is available
         if status_text:
-            status_text.text("Parsing results...")
+            status_text.text("Parsing results from HTML (may be limited without JavaScript rendering)...")
         parsed_listings = parse_google_maps_data(html_content, max_results)
         
         if not parsed_listings:
-            # Fallback: Use Google Maps Places API if available
-            places_api_key = os.getenv('GOOGLE_MAPS_API_KEY', '')
-            if places_api_key:
-                return fetch_from_places_api(keyword, latitude, longitude, max_results, reviews_threshold, vetting_threshold, vetter, status_text, progress_bar)
-            else:
-                if status_text:
-                    status_text.text("No listings found. Google Maps may require JavaScript rendering. Consider using ScraperAPI or Google Maps Places API.")
-                return []
+            if status_text:
+                status_text.text("No listings found. Google Maps loads content with JavaScript. Consider using Google Maps Places API for reliable results.")
+            return []
         
         progress_step = 1.0 / len(parsed_listings) if parsed_listings else 0
         current_progress = 0.0
