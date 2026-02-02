@@ -238,15 +238,10 @@
                 <label for="onlyNoWebsite">Only Show Leads Without Websites</label>
             </div>
             
-            <div class="checkbox-group">
-                <input type="checkbox" id="useScraperAPI" name="useScraperAPI">
-                <label for="useScraperAPI">Use ScraperAPI (Optional - for better results, set SCRAPER_API_KEY env var)</label>
-            </div>
-            
             <div style="background: #e3f2fd; border: 1px solid #2196f3; border-radius: 8px; padding: 15px; margin: 20px 0;">
-                <strong>ℹ️ Note:</strong> This scraper works without APIs by extracting data from HTML. 
+                <strong>ℹ️ Note:</strong> This scraper extracts data from HTML. 
                 Results may be limited since Google Maps loads content dynamically with JavaScript. 
-                For best results, use Google Maps Places API (set <code>GOOGLE_MAPS_API_KEY</code> env var).
+                For best results, use Google Maps Places API (set <code>GOOGLE_MAPS_API_KEY</code> env var in Vercel).
             </div>
             
             <button type="submit" id="submitBtn">Start Scraping</button>
@@ -433,7 +428,6 @@
                 const reviewsThreshold = parseInt(document.getElementById('reviewsThreshold').value);
                 const vettingThreshold = parseInt(document.getElementById('vettingThreshold').value);
                 const onlyNoWebsite = document.getElementById('onlyNoWebsite').checked;
-                const useScraperAPI = document.getElementById('useScraperAPI').checked;
                 
                 showStatus('Geocoding location...', 'info');
                 
@@ -460,8 +454,7 @@
                         zoom_level: zoom,
                         max_results: maxResults,
                         reviews_threshold: reviewsThreshold,
-                        vetting_threshold: vettingThreshold,
-                        use_scraper_api: useScraperAPI
+                        vetting_threshold: vettingThreshold
                     })
                 });
                 

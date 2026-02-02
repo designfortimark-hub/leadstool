@@ -16,17 +16,8 @@ import urllib.parse
 def random_sleep(min_seconds=1, max_seconds=3):
     time.sleep(random.uniform(min_seconds, max_seconds))
 
-def get_scraper_api_url(url, api_key=None):
-    """Get ScraperAPI URL for headless browser scraping"""
-    if not api_key:
-        api_key = os.getenv('SCRAPER_API_KEY', '')
-    
-    if api_key:
-        return f"http://api.scraperapi.com?api_key={api_key}&url={urllib.parse.quote(url)}&render=true"
-    return url
-
-def fetch_with_retry(url, max_retries=3, use_scraper_api=False, api_key=None):
-    """Fetch URL with retry logic and optional ScraperAPI"""
+def fetch_with_retry(url, max_retries=3):
+    """Fetch URL with retry logic"""
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
@@ -35,9 +26,6 @@ def fetch_with_retry(url, max_retries=3, use_scraper_api=False, api_key=None):
         'Connection': 'keep-alive',
         'Upgrade-Insecure-Requests': '1',
     }
-    
-    if use_scraper_api:
-        url = get_scraper_api_url(url, api_key)
     
     for attempt in range(max_retries):
         try:
@@ -223,7 +211,7 @@ def parse_google_maps_data(html_content, max_results):
     
     return unique_listings
 
-def run_google_maps_scraper(keyword, search_location, latitude, longitude, zoom_level, max_results, progress_bar, status_text, reviews_threshold, vetting_threshold, use_api=False, api_key=None):
+def run_google_maps_scraper(keyword, search_location, latitude, longitude, zoom_level, max_results, progress_bar, status_text, reviews_threshold, vetting_threshold):
     """Main scraper function - tries to work without API, but results may be limited"""
     leads = []
     vetter = VettingEngine()
@@ -243,16 +231,11 @@ def run_google_maps_scraper(keyword, search_location, latitude, longitude, zoom_
         encoded_query = urllib.parse.quote(query)
         url = f"https://www.google.com/maps/search/{encoded_query}/@{latitude},{longitude},{zoom_level}z"
         
-        # Try to fetch without API first (may get limited results)
+        # Try direct fetch - Google Maps may return some data in initial HTML
         if status_text:
-            status_text.text("Fetching Google Maps data (no API - results may be limited)...")
+            status_text.text("Fetching Google Maps data (results may be limited without JavaScript rendering)...")
         
-        # Use ScraperAPI if provided, otherwise try direct fetch
-        if use_api and api_key:
-            html_content = fetch_with_retry(url, use_scraper_api=True, api_key=api_key)
-        else:
-            # Try direct fetch - Google Maps may return some data in initial HTML
-            html_content = fetch_with_retry(url, use_scraper_api=False, api_key=None)
+        html_content = fetch_with_retry(url)
         
         if not html_content:
             if status_text:
@@ -286,7 +269,7 @@ def run_google_maps_scraper(keyword, search_location, latitude, longitude, zoom_
                 if listing.get('url') and website == 'N/A':
                     place_url = f"https://www.google.com{listing['url']}" if listing['url'].startswith('/') else listing['url']
                     try:
-                        place_html = fetch_with_retry(place_url, use_scraper_api=use_api, api_key=api_key)
+                        place_html = fetch_with_retry(place_url)
                         if place_html:
                             place_soup = BeautifulSoup(place_html, 'html.parser')
                             
